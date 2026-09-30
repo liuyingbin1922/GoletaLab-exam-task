@@ -72,14 +72,15 @@ npm test
 | POST | `/api/tasks` | 创建任务（可带奖励配置，初始为草稿） |
 | PUT | `/api/tasks/:id` | 编辑任务（含奖励配置） |
 | POST | `/api/tasks/:id/enable` | 启用任务 |
-| POST | `/api/tasks/:id/disable` | 停用任务 |
+| POST | `/api/tasks/:id/disable` | 停用任务（历史完成/奖励记录保留） |
+| DELETE | `/api/tasks/:id` | 删除任务（已有用户领取奖励时不允许删除） |
 | POST | `/api/tasks/:id/complete` | body `{ userId }`，用户标记任务完成 |
 | POST | `/api/tasks/:id/claim` | body `{ userId }`，领取奖励（生成奖励记录） |
 | GET | `/api/users/:id/tasks` | 某用户的任务参与状态 |
 | GET | `/api/users/:id/rewards` | 某用户的奖励领取记录 |
 
 任务字段：名称、描述、状态（draft/enabled/disabled）、开始时间、结束时间、创建/更新时间、奖励信息。
-奖励字段：名称、类型（points/coins/coupon/item）、数量/价值（正整数）、状态（active/inactive）。
+奖励字段：名称、类型（points/coins/coupon/item）、数量/价值（正整数）、状态（active/inactive）、库存（stock，留空/NULL 表示不限）、已领取数量（claimed_count）。
 
 ## 核心业务流程
 
@@ -90,9 +91,25 @@ npm test
 
 关键规则：
 
-- 仅 `enabled` 且处于有效期 `[start_time, end_time]` 内的任务可完成、对用户展示可完成按钮；
-- 未完成任务不能领取；已领取不能重复领取（`reward_records` 对 `(user_id, task_id)` 有唯一约束，并在事务前校验）；
-- 创建/编辑有参数校验（名称为空、时间格式、结束早于开始、奖励类型/数值非法等均返回 400）。
+**完成校验（需求 1）**
+- 仅 `enabled` 且处于有效期 `[start_time, end_time]` 内的任务可完成；未开始/已过期分别返回「任务未开始，暂不能完成」「任务已过期，无法完成」；
+- 同一用户不能重复完成同一任务（「任务已完成，无需重复操作」）；
+- 已领取的任务不能再次领取（「奖励已领取，请勿重复领取」），`reward_records` 对 `(user_id, task_id)` 有唯一约束兜底。
+
+**奖励库存（需求 2）**
+- 奖励含库存（stock）、已领取数量（claimed_count）、剩余库存（接口以 `remaining` / `soldOut` 返回），`stock` 留空表示不限；
+- 领取时先查库存，扣减使用 `UPDATE ... WHERE claimed_count < stock` 原子操作并在事务内写入奖励记录；库存不足返回「奖励已领完（库存不足）」，并发下不会超发、不会变为负数；
+- 剩余库存为 0 时前端展示「已领完」，领取按钮不可操作。
+
+**编辑兼容（需求 3）**
+- 已有用户完成的任务，不允许修改奖励类型（名称、数量等其他字段可改）；
+- 已有用户领取奖励的任务，不允许删除（`DELETE /api/tasks/:id` 返回 400）；
+- 已经开始的任务（开始时间已到），不能把开始时间修改到当前时间之后；
+- 停用任务只改状态，历史完成记录（user_tasks）与奖励记录（reward_records）均保留可查。
+
+**测试（需求 4）**：`npm test` 共 15 个用例，覆盖正常完成、重复完成、正常领取、重复领取、库存不足（含库存不为负断言）、任务过期、任务未开始、禁用任务、奖励类型锁定、开始时间锁定、删除保护与停用后历史保留。
+
+其余通用校验（名称为空、时间格式、结束早于开始、奖励数值非法等）均返回 400。
 
 ## 已知限制
 

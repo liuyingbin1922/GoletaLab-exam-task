@@ -44,7 +44,9 @@ async function load() {
   }
   tbody.innerHTML = tasks.map((t) => {
     const r = t.reward;
-    const rewardText = r ? `${r.name}（${r.type} × ${r.value}）` : '<span class="muted">未配置奖励</span>';
+    const rewardText = r
+      ? `${r.name}（${r.type} × ${r.value}）<br>${stockText(r)}`
+      : '<span class="muted">未配置奖励</span>';
     let stateHtml = stateTag(t.userState);
     if (!t.inWindow) stateHtml += ' <span class="tag out">不在有效期</span>';
     let actions = `<a href="/tasks/${t.id}">详情</a>`;
@@ -52,7 +54,11 @@ async function load() {
       actions += ` <button class="btn small green" onclick="complete(${t.id})">完成任务</button>`;
     }
     if (t.userState === 'completed_unclaimed') {
-      actions += ` <button class="btn small orange" onclick="claim(${t.id})">领取奖励</button>`;
+      if (r && r.soldOut) {
+        actions += ' <span class="tag out">已领完</span>';
+      } else {
+        actions += ` <button class="btn small orange" onclick="claim(${t.id})">领取奖励</button>`;
+      }
     }
     return `<tr>
       <td><a href="/tasks/${t.id}">${t.name}</a></td>

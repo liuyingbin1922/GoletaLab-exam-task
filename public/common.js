@@ -31,6 +31,14 @@ function taskStatusTag(status) {
   return `<span class="tag ${status}">${TASK_STATUS_LABELS[status] || status}</span>`;
 }
 
+// 奖励库存展示：不限库存 / 剩余/总量 / 已领完
+function stockText(r) {
+  if (!r) return '';
+  if (r.stock === null || r.stock === undefined) return '库存不限';
+  if (r.soldOut) return '<span class="tag out">已领完</span>';
+  return `剩余库存 ${r.remaining}/${r.stock}`;
+}
+
 async function renderUserSwitch() {
   const box = document.getElementById('user-switch');
   if (!box) return;

@@ -28,6 +28,11 @@ function getTaskOr404(req, res) {
 
 function taskWithReward(task) {
   const reward = db.prepare('SELECT * FROM rewards WHERE task_id = ?').get(task.id);
+  if (reward) {
+    const remaining = reward.stock === null ? null : Math.max(0, reward.stock - reward.claimed_count);
+    reward.remaining = remaining;
+    reward.soldOut = remaining !== null && remaining <= 0;
+  }
   return { ...task, reward: reward || null };
 }
 
@@ -35,6 +40,24 @@ function isWithinWindow(task) {
   const now = new Date();
   return new Date(task.start_time.replace(' ', 'T')) <= now
     && now <= new Date(task.end_time.replace(' ', 'T'));
+}
+
+// 返回任务当前相对有效期的时间状态：not_started / in_window / expired
+function windowState(task) {
+  const now = new Date();
+  if (now < new Date(task.start_time.replace(' ', 'T'))) return 'not_started';
+  if (now > new Date(task.end_time.replace(' ', 'T'))) return 'expired';
+  return 'in_window';
+}
+
+function hasCompletedUsers(taskId) {
+  return !!db.prepare(
+    `SELECT id FROM user_tasks WHERE task_id = ? AND status = 'completed' LIMIT 1`,
+  ).get(taskId);
+}
+
+function hasClaimedUsers(taskId) {
+  return !!db.prepare('SELECT id FROM reward_records WHERE task_id = ? LIMIT 1').get(taskId);
 }
 
 function validateTaskBody(body) {
@@ -46,11 +69,13 @@ function validateTaskBody(body) {
     return '结束时间必须晚于开始时间';
   }
   if (reward !== undefined && reward !== null) {
-    const { name: rName, type, value, status } = reward;
+    const { name: rName, type, value, status, stock } = reward;
     if (!rName || !String(rName).trim()) return '奖励名称不能为空';
     if (!REWARD_TYPES.includes(type)) return `奖励类型必须是：${REWARD_TYPES.join(' / ')}`;
     if (!Number.isInteger(value) || value <= 0) return '奖励数量/价值必须是正整数';
     if (status !== undefined && !REWARD_STATUSES.includes(status)) return '奖励状态无效';
+    if (stock !== undefined && stock !== null
+        && (!Number.isInteger(stock) || stock <= 0)) return '奖励库存必须是正整数，留空表示不限库存';
   }
   return null;
 }
@@ -148,10 +173,10 @@ function createTask(req, res) {
     const taskId = info.lastInsertRowid;
     if (reward) {
       db.prepare(`
-        INSERT INTO rewards (task_id, name, type, value, status)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO rewards (task_id, name, type, value, status, stock)
+        VALUES (?, ?, ?, ?, ?, ?)
       `).run(taskId, String(reward.name).trim(), reward.type, reward.value,
-        reward.status || 'active');
+        reward.status || 'active', reward.stock ?? null);
     }
     return taskId;
   });
@@ -166,6 +191,18 @@ function updateTask(req, res) {
   if (err) return badRequest(res, err);
 
   const { name, description = '', startTime, endTime, reward } = req.body;
+
+  // 编辑兼容规则
+  const existingReward = db.prepare('SELECT * FROM rewards WHERE task_id = ?').get(task.id);
+  if (reward && existingReward && hasCompletedUsers(task.id) && reward.type !== existingReward.type) {
+    return badRequest(res, '已有用户完成该任务，不允许修改奖励类型');
+  }
+  // 已经开始的任务（开始时间已到）不能把开始时间修改到当前时间之后
+  const taskStarted = windowState(task) !== 'not_started';
+  if (taskStarted && Date.parse(startTime.replace(' ', 'T')) > Date.now()) {
+    return badRequest(res, '任务已开始，不能把开始时间修改到当前时间之后');
+  }
+
   const tx = db.transaction(() => {
     db.prepare(`
       UPDATE tasks SET name = ?, description = ?, start_time = ?, end_time = ?,
@@ -173,23 +210,33 @@ function updateTask(req, res) {
       WHERE id = ?
     `).run(name.trim(), String(description), startTime, endTime, task.id);
     if (reward) {
-      const existing = db.prepare('SELECT * FROM rewards WHERE task_id = ?').get(task.id);
-      if (existing) {
+      const stock = reward.stock === undefined ? existingReward?.stock ?? null : reward.stock;
+      if (existingReward) {
         db.prepare(`
-          UPDATE rewards SET name = ?, type = ?, value = ?, status = ? WHERE task_id = ?
+          UPDATE rewards SET name = ?, type = ?, value = ?, status = ?, stock = ? WHERE task_id = ?
         `).run(String(reward.name).trim(), reward.type, reward.value,
-          reward.status || existing.status, task.id);
+          reward.status || existingReward.status, stock, task.id);
       } else {
         db.prepare(`
-          INSERT INTO rewards (task_id, name, type, value, status)
-          VALUES (?, ?, ?, ?, ?)
+          INSERT INTO rewards (task_id, name, type, value, status, stock)
+          VALUES (?, ?, ?, ?, ?, ?)
         `).run(task.id, String(reward.name).trim(), reward.type, reward.value,
-          reward.status || 'active');
+          reward.status || 'active', stock);
       }
     }
   });
   tx();
   res.json({ task: taskWithReward(db.prepare('SELECT * FROM tasks WHERE id = ?').get(task.id)) });
+}
+
+function deleteTask(req, res) {
+  const task = getTaskOr404(req, res);
+  if (!task) return;
+  if (hasClaimedUsers(task.id)) {
+    return badRequest(res, '已有用户领取该任务的奖励，不允许删除');
+  }
+  db.prepare('DELETE FROM tasks WHERE id = ?').run(task.id);
+  res.json({ ok: true, deletedId: task.id });
 }
 
 function setTaskStatus(status) {
@@ -211,7 +258,9 @@ function completeTask(req, res) {
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
   if (!user) return badRequest(res, 'userId 无效');
   if (task.status !== 'enabled') return badRequest(res, '任务未启用，无法完成');
-  if (!isWithinWindow(task)) return badRequest(res, '任务不在有效期内');
+  const ws = windowState(task);
+  if (ws === 'not_started') return badRequest(res, '任务未开始，暂不能完成');
+  if (ws === 'expired') return badRequest(res, '任务已过期，无法完成');
 
   const existing = db.prepare('SELECT * FROM user_tasks WHERE user_id = ? AND task_id = ?').get(userId, task.id);
   if (existing?.status === 'completed') return badRequest(res, '任务已完成，无需重复操作');
@@ -240,13 +289,32 @@ function claimReward(req, res) {
 
   const dup = db.prepare('SELECT id FROM reward_records WHERE user_id = ? AND task_id = ?').get(userId, task.id);
   if (dup) return badRequest(res, '奖励已领取，请勿重复领取');
+  if (reward.stock !== null && reward.claimed_count >= reward.stock) {
+    return badRequest(res, '奖励已领完（库存不足）');
+  }
 
-  const info = db.prepare(`
-    INSERT INTO reward_records (user_id, task_id, reward_id, reward_name, reward_type, value)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(userId, task.id, reward.id, reward.name, reward.type, reward.value);
+  // 原子扣减库存并写入奖励记录，保证并发下不会超发、不会出现负库存
+  const tx = db.transaction(() => {
+    const dec = db.prepare(`
+      UPDATE rewards SET claimed_count = claimed_count + 1
+      WHERE task_id = ? AND (stock IS NULL OR claimed_count < stock)
+    `).run(task.id);
+    if (dec.changes === 0) {
+      throw Object.assign(new Error('奖励已领完（库存不足）'), { status: 400 });
+    }
+    return db.prepare(`
+      INSERT INTO reward_records (user_id, task_id, reward_id, reward_name, reward_type, value)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(userId, task.id, reward.id, reward.name, reward.type, reward.value).lastInsertRowid;
+  });
 
-  const record = db.prepare('SELECT * FROM reward_records WHERE id = ?').get(info.lastInsertRowid);
+  let recordId;
+  try {
+    recordId = tx();
+  } catch (e) {
+    return badRequest(res, e.message || '领取失败');
+  }
+  const record = db.prepare('SELECT * FROM reward_records WHERE id = ?').get(recordId);
   res.status(201).json({ ok: true, record, userState: 'claimed' });
 }
 
@@ -263,6 +331,7 @@ function createApiRouter() {
   router.get('/tasks/:id', getTask);
   router.post('/tasks', createTask);
   router.put('/tasks/:id', updateTask);
+  router.delete('/tasks/:id', deleteTask);
   router.post('/tasks/:id/enable', setTaskStatus('enabled'));
   router.post('/tasks/:id/disable', setTaskStatus('disabled'));
   router.post('/tasks/:id/complete', completeTask);

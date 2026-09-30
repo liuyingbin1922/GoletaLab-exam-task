@@ -36,13 +36,15 @@ function migrate(db) {
     );
 
     CREATE TABLE IF NOT EXISTS rewards (
-      id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      task_id    INTEGER NOT NULL UNIQUE REFERENCES tasks(id) ON DELETE CASCADE,
-      name       TEXT NOT NULL,
-      type       TEXT NOT NULL CHECK (type IN ('points','coins','coupon','item')),
-      value      INTEGER NOT NULL,
-      status     TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','inactive')),
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id       INTEGER NOT NULL UNIQUE REFERENCES tasks(id) ON DELETE CASCADE,
+      name          TEXT NOT NULL,
+      type          TEXT NOT NULL CHECK (type IN ('points','coins','coupon','item')),
+      value         INTEGER NOT NULL,
+      status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','inactive')),
+      stock         INTEGER,               -- NULL 表示不限库存
+      claimed_count INTEGER NOT NULL DEFAULT 0,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS user_tasks (
@@ -72,6 +74,13 @@ function migrate(db) {
     CREATE INDEX IF NOT EXISTS idx_user_tasks_user ON user_tasks(user_id);
     CREATE INDEX IF NOT EXISTS idx_reward_records_user ON reward_records(user_id);
   `);
+
+  // 兼容旧库：为已存在的 rewards 表补充库存字段
+  const cols = db.prepare('PRAGMA table_info(rewards)').all().map((c) => c.name);
+  if (!cols.includes('stock')) db.exec('ALTER TABLE rewards ADD COLUMN stock INTEGER');
+  if (!cols.includes('claimed_count')) {
+    db.exec('ALTER TABLE rewards ADD COLUMN claimed_count INTEGER NOT NULL DEFAULT 0');
+  }
 }
 
 function seedIfEmpty(db) {
@@ -87,8 +96,8 @@ function seedIfEmpty(db) {
     VALUES (@name, @description, @status, @startTime, @endTime)
   `);
   const insertReward = db.prepare(`
-    INSERT INTO rewards (task_id, name, type, value, status)
-    VALUES (@taskId, @name, @type, @value, @status)
+    INSERT INTO rewards (task_id, name, type, value, status, stock)
+    VALUES (@taskId, @name, @type, @value, @status, @stock)
   `);
   const insertUserTask = db.prepare(`
     INSERT INTO user_tasks (user_id, task_id, status, completed_at)
@@ -103,7 +112,7 @@ function seedIfEmpty(db) {
       startTime: '2026-01-01 00:00:00',
       endTime: '2027-12-31 23:59:59',
     }).lastInsertRowid;
-    insertReward.run({ taskId: t1, name: '10 积分', type: 'points', value: 10, status: 'active' });
+    insertReward.run({ taskId: t1, name: '10 积分', type: 'points', value: 10, status: 'active', stock: 100 });
     // 用户 1 已完成未领取（可在页面演示领取流程）
     insertUserTask.run(1, t1);
 
@@ -114,7 +123,7 @@ function seedIfEmpty(db) {
       startTime: '2026-01-01 00:00:00',
       endTime: '2027-12-31 23:59:59',
     }).lastInsertRowid;
-    insertReward.run({ taskId: t2, name: '50 金币', type: 'coins', value: 50, status: 'active' });
+    insertReward.run({ taskId: t2, name: '50 金币', type: 'coins', value: 50, status: 'active', stock: 50 });
 
     const t3 = insertTask.run({
       name: '邀请好友注册',
@@ -123,7 +132,7 @@ function seedIfEmpty(db) {
       startTime: '2026-01-01 00:00:00',
       endTime: '2027-12-31 23:59:59',
     }).lastInsertRowid;
-    insertReward.run({ taskId: t3, name: '5 元优惠券', type: 'coupon', value: 500, status: 'active' });
+    insertReward.run({ taskId: t3, name: '5 元优惠券', type: 'coupon', value: 500, status: 'active', stock: null });
   });
   seedAll();
 }

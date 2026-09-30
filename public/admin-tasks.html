@@ -40,7 +40,7 @@ async function load() {
   tbody.innerHTML = tasks.map((t) => {
     const r = t.reward;
     const rewardText = r
-      ? `${r.name}（${r.type} × ${r.value}）${r.status === 'inactive' ? ' <span class="tag disabled">奖励停用</span>' : ''}`
+      ? `${r.name}（${r.type} × ${r.value}）<br>${stockText(r)}${r.status === 'inactive' ? ' <span class="tag disabled">奖励停用</span>' : ''}`
       : '<span class="muted">未配置</span>';
     let ops = `<a href="/admin/tasks/${t.id}/edit">编辑</a> `;
     if (t.status !== 'enabled') {
@@ -49,6 +49,7 @@ async function load() {
     if (t.status === 'enabled') {
       ops += `<button class="btn small red" onclick="setStatus(${t.id}, 'disable')">停用</button>`;
     }
+    ops += `<button class="btn small gray" onclick="removeTask(${t.id}, '${t.name.replace(/'/g, '')}')">删除</button>`;
     return `<tr>
       <td>${t.id}</td>
       <td><a href="/tasks/${t.id}">${t.name}</a></td>
@@ -64,7 +65,16 @@ async function load() {
 async function setStatus(id, action) {
   try {
     await api(`/api/tasks/${id}/${action}`, { method: 'POST' });
-    showMsg('msg', action === 'enable' ? '任务已启用' : '任务已停用');
+    showMsg('msg', action === 'enable' ? '任务已启用' : '任务已停用（历史完成与奖励记录保留）');
+    load();
+  } catch (e) { showMsg('msg', e.message, false); }
+}
+
+async function removeTask(id, name) {
+  if (!confirm(`确定删除任务「${name}」？已有领取记录的任务无法删除。`)) return;
+  try {
+    await api(`/api/tasks/${id}`, { method: 'DELETE' });
+    showMsg('msg', `任务 #${id} 已删除`);
     load();
   } catch (e) { showMsg('msg', e.message, false); }
 }

@@ -46,6 +46,9 @@
       <label>奖励数量/价值 *（正整数）</label>
       <input name="rewardValue" type="number" min="1" step="1" placeholder="例如：10">
 
+      <label>奖励库存（正整数，留空表示不限库存）</label>
+      <input name="rewardStock" type="number" min="1" step="1" placeholder="留空 = 不限">
+
       <div class="actions">
         <button class="btn green" type="submit">保存</button>
         <a class="btn gray" href="/admin/tasks">返回列表</a>
@@ -71,6 +74,7 @@ if (editId) {
       form.rewardName.value = t.reward.name;
       form.rewardType.value = t.reward.type;
       form.rewardValue.value = t.reward.value;
+      form.rewardStock.value = t.reward.stock ?? '';
     }
   }).catch((e) => showMsg('msg', e.message, false));
 }
@@ -88,6 +92,7 @@ form.addEventListener('submit', async (e) => {
       name: form.rewardName.value.trim(),
       type: form.rewardType.value,
       value: Number(form.rewardValue.value),
+      stock: form.rewardStock.value === '' ? null : Number(form.rewardStock.value),
     };
   }
   try {

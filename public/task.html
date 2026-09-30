@@ -38,7 +38,9 @@ async function load() {
     buttons += `<button class="btn green" onclick="completeTask()">我已完成任务</button>`;
   }
   if (t.userState === 'completed_unclaimed') {
-    buttons += `<button class="btn orange" onclick="claim()">领取奖励</button>`;
+    buttons += r && r.soldOut
+      ? '<span class="tag out">奖励已领完</span>'
+      : `<button class="btn orange" onclick="claim()">领取奖励</button>`;
   }
 
   document.getElementById('task-card').innerHTML = `
@@ -51,6 +53,7 @@ async function load() {
     <h2 style="margin-top:16px">奖励信息</h2>
     ${r ? `
       <p class="reward-line">名称：${r.name}　类型：${r.type}　价值：${r.value}　状态：${r.status === 'active' ? '有效' : '已停用'}</p>
+      <p class="reward-line">${stockText(r)}　已领取 ${r.claimed_count} 件</p>
     ` : '<p class="muted">该任务暂未配置奖励</p>'}
     <div class="actions">${buttons}</div>`;
 }
