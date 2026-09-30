@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>任务管理 - 任务奖励中心</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <span class="brand">任务奖励中心 · 运营后台</span>
+  <nav>
+    <a href="/">用户端·任务列表</a>
+    <a href="/admin/tasks" class="active">任务管理</a>
+    <a href="/admin/tasks/create">创建任务</a>
+  </nav>
+</header>
+<main>
+  <h1>任务管理</h1>
+  <p style="margin-bottom:12px"><a class="btn green" href="/admin/tasks/create">+ 创建任务</a></p>
+  <div id="msg" class="msg"></div>
+  <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th><th>任务名称</th><th>状态</th><th>奖励</th><th>有效期</th><th>创建时间</th><th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="task-list">
+        <tr><td colspan="7" class="muted">加载中…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</main>
+<script src="/common.js"></script>
+<script>
+async function load() {
+  const { tasks } = await api('/api/tasks/all');
+  const tbody = document.getElementById('task-list');
+  tbody.innerHTML = tasks.map((t) => {
+    const r = t.reward;
+    const rewardText = r
+      ? `${r.name}（${r.type} × ${r.value}）${r.status === 'inactive' ? ' <span class="tag disabled">奖励停用</span>' : ''}`
+      : '<span class="muted">未配置</span>';
+    let ops = `<a href="/admin/tasks/${t.id}/edit">编辑</a> `;
+    if (t.status !== 'enabled') {
+      ops += `<button class="btn small green" onclick="setStatus(${t.id}, 'enable')">启用</button>`;
+    }
+    if (t.status === 'enabled') {
+      ops += `<button class="btn small red" onclick="setStatus(${t.id}, 'disable')">停用</button>`;
+    }
+    return `<tr>
+      <td>${t.id}</td>
+      <td><a href="/tasks/${t.id}">${t.name}</a></td>
+      <td>${taskStatusTag(t.status)}</td>
+      <td>${rewardText}</td>
+      <td class="muted">${t.start_time}<br>至 ${t.end_time}</td>
+      <td class="muted">${t.created_at}</td>
+      <td>${ops}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function setStatus(id, action) {
+  try {
+    await api(`/api/tasks/${id}/${action}`, { method: 'POST' });
+    showMsg('msg', action === 'enable' ? '任务已启用' : '任务已停用');
+    load();
+  } catch (e) { showMsg('msg', e.message, false); }
+}
+
+load().catch((e) => showMsg('msg', e.message, false));
+</script>
+</body>
+</html>

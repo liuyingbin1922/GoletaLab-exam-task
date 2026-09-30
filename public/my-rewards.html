@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>我的奖励 - 任务奖励中心</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <span class="brand">任务奖励中心</span>
+  <nav>
+    <a href="/">任务列表</a>
+    <a href="/my-rewards" class="active">我的奖励</a>
+    <a href="/admin/tasks">任务管理</a>
+  </nav>
+  <span class="user-switch" id="user-switch"></span>
+</header>
+<main>
+  <h1>我的奖励</h1>
+  <div class="card">
+    <table>
+      <thead>
+        <tr><th>#</th><th>来源任务</th><th>奖励名称</th><th>类型</th><th>价值</th><th>领取时间</th></tr>
+      </thead>
+      <tbody id="reward-list">
+        <tr><td colspan="6" class="muted">加载中…</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h1 style="margin-top:24px">我的任务进度</h1>
+  <div class="card">
+    <table>
+      <thead>
+        <tr><th>任务名称</th><th>任务状态</th><th>我的状态</th><th>完成时间</th></tr>
+      </thead>
+      <tbody id="progress-list">
+        <tr><td colspan="4" class="muted">加载中…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</main>
+<script src="/common.js"></script>
+<script>
+async function load() {
+  const userId = getUserId();
+  const [rewardRes, taskRes] = await Promise.all([
+    api(`/api/users/${userId}/rewards`),
+    api(`/api/users/${userId}/tasks`),
+  ]);
+
+  const rtbody = document.getElementById('reward-list');
+  rtbody.innerHTML = rewardRes.rewards.length
+    ? rewardRes.rewards.map((r) => `<tr>
+        <td>${r.id}</td><td>${r.task_name}</td><td>${r.reward_name}</td>
+        <td>${r.reward_type}</td><td>${r.value}</td><td>${r.claimed_at}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="6" class="muted">还没有领取过奖励</td></tr>';
+
+  const ptbody = document.getElementById('progress-list');
+  ptbody.innerHTML = taskRes.tasks.length
+    ? taskRes.tasks.map((t) => `<tr>
+        <td><a href="/tasks/${t.id}">${t.name}</a></td>
+        <td>${taskStatusTag(t.status)}</td>
+        <td>${stateTag(t.userState)}</td>
+        <td>${fmt(t.completed_at)}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="4" class="muted">还没有参与过任务</td></tr>';
+}
+
+load().catch((e) => {
+  document.getElementById('reward-list').innerHTML = `<tr><td colspan="6" class="muted">${e.message}</td></tr>`;
+});
+</script>
+</body>
+</html>

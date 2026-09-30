@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>任务列表 - 任务奖励中心</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <span class="brand">任务奖励中心</span>
+  <nav>
+    <a href="/" class="active">任务列表</a>
+    <a href="/my-rewards">我的奖励</a>
+    <a href="/admin/tasks">任务管理</a>
+  </nav>
+  <span class="user-switch" id="user-switch"></span>
+</header>
+<main>
+  <h1>任务列表</h1>
+  <div id="msg" class="msg"></div>
+  <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>任务名称</th><th>奖励</th><th>有效期</th><th>我的状态</th><th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="task-list">
+        <tr><td colspan="5" class="muted">加载中…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</main>
+<script src="/common.js"></script>
+<script>
+async function load() {
+  const userId = getUserId();
+  const { tasks } = await api(`/api/tasks?userId=${userId}`);
+  const tbody = document.getElementById('task-list');
+  if (!tasks.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="muted">暂无进行中的任务</td></tr>';
+    return;
+  }
+  tbody.innerHTML = tasks.map((t) => {
+    const r = t.reward;
+    const rewardText = r ? `${r.name}（${r.type} × ${r.value}）` : '<span class="muted">未配置奖励</span>';
+    let stateHtml = stateTag(t.userState);
+    if (!t.inWindow) stateHtml += ' <span class="tag out">不在有效期</span>';
+    let actions = `<a href="/tasks/${t.id}">详情</a>`;
+    if (t.inWindow && t.userState === 'not_started') {
+      actions += ` <button class="btn small green" onclick="complete(${t.id})">完成任务</button>`;
+    }
+    if (t.userState === 'completed_unclaimed') {
+      actions += ` <button class="btn small orange" onclick="claim(${t.id})">领取奖励</button>`;
+    }
+    return `<tr>
+      <td><a href="/tasks/${t.id}">${t.name}</a></td>
+      <td>${rewardText}</td>
+      <td class="muted">${t.start_time}<br>至 ${t.end_time}</td>
+      <td>${stateHtml}</td>
+      <td>${actions}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function complete(id) {
+  try {
+    await api(`/api/tasks/${id}/complete`, { method: 'POST', body: JSON.stringify({ userId: getUserId() }) });
+    showMsg('msg', '任务已完成，快去领取奖励吧！');
+    load();
+  } catch (e) { showMsg('msg', e.message, false); }
+}
+
+async function claim(id) {
+  try {
+    const data = await api(`/api/tasks/${id}/claim`, { method: 'POST', body: JSON.stringify({ userId: getUserId() }) });
+    showMsg('msg', `领取成功：${data.record.reward_name}，可在「我的奖励」中查看`);
+    load();
+  } catch (e) { showMsg('msg', e.message, false); }
+}
+
+load().catch((e) => showMsg('msg', e.message, false));
+</script>
+</body>
+</html>

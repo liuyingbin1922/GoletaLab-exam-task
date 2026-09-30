@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>创建/编辑任务 - 任务奖励中心</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <span class="brand">任务奖励中心 · 运营后台</span>
+  <nav>
+    <a href="/admin/tasks">任务管理</a>
+    <a href="/admin/tasks/create" class="active">创建任务</a>
+  </nav>
+</header>
+<main>
+  <h1 id="page-title">创建任务</h1>
+  <div class="card">
+    <div id="msg" class="msg"></div>
+    <form id="task-form">
+      <label>任务名称 *</label>
+      <input name="name" required placeholder="例如：每日签到">
+
+      <label>任务描述</label>
+      <textarea name="description" placeholder="任务的具体要求"></textarea>
+
+      <label>开始时间 *（格式：YYYY-MM-DD HH:mm:ss）</label>
+      <input name="startTime" required placeholder="2026-01-01 00:00:00">
+
+      <label>结束时间 *</label>
+      <input name="endTime" required placeholder="2027-12-31 23:59:59">
+
+      <h2 style="margin-top:20px">奖励配置</h2>
+      <label>奖励名称 *</label>
+      <input name="rewardName" placeholder="例如：10 积分">
+
+      <label>奖励类型 *</label>
+      <select name="rewardType">
+        <option value="points">积分（points）</option>
+        <option value="coins">金币（coins）</option>
+        <option value="coupon">优惠券（coupon）</option>
+        <option value="item">实物（item）</option>
+      </select>
+
+      <label>奖励数量/价值 *（正整数）</label>
+      <input name="rewardValue" type="number" min="1" step="1" placeholder="例如：10">
+
+      <div class="actions">
+        <button class="btn green" type="submit">保存</button>
+        <a class="btn gray" href="/admin/tasks">返回列表</a>
+      </div>
+    </form>
+  </div>
+</main>
+<script src="/common.js"></script>
+<script>
+// /admin/tasks/create 为新建；/admin/tasks/:id/edit 为编辑
+const parts = location.pathname.split('/').filter(Boolean); // ['admin','tasks','create' | ':id','edit']
+const editId = parts.length === 4 ? parts[2] : null;
+const form = document.getElementById('task-form');
+
+if (editId) {
+  document.getElementById('page-title').textContent = `编辑任务 #${editId}`;
+  api(`/api/tasks/${editId}`).then(({ task: t }) => {
+    form.name.value = t.name;
+    form.description.value = t.description || '';
+    form.startTime.value = t.start_time;
+    form.endTime.value = t.end_time;
+    if (t.reward) {
+      form.rewardName.value = t.reward.name;
+      form.rewardType.value = t.reward.type;
+      form.rewardValue.value = t.reward.value;
+    }
+  }).catch((e) => showMsg('msg', e.message, false));
+}
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = {
+    name: form.name.value.trim(),
+    description: form.description.value.trim(),
+    startTime: form.startTime.value.trim(),
+    endTime: form.endTime.value.trim(),
+  };
+  if (form.rewardName.value.trim()) {
+    body.reward = {
+      name: form.rewardName.value.trim(),
+      type: form.rewardType.value,
+      value: Number(form.rewardValue.value),
+    };
+  }
+  try {
+    if (editId) {
+      await api(`/api/tasks/${editId}`, { method: 'PUT', body: JSON.stringify(body) });
+      showMsg('msg', '任务已更新');
+    } else {
+      await api('/api/tasks', { method: 'POST', body: JSON.stringify(body) });
+      showMsg('msg', '任务已创建（默认为草稿状态，请在任务管理中启用）');
+      form.reset();
+    }
+  } catch (err) { showMsg('msg', err.message, false); }
+});
+</script>
+</body>
+</html>
